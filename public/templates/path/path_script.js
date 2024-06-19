@@ -25,7 +25,7 @@ const selectionbox = document.getElementById("{uniqueID}_topic");
 const icon = document.getElementById("{uniqueID}_icon").getElementsByTagName('img')[0];
 
 const canvas = document.getElementById('{uniqueID}_canvas');
-const ctx = canvas.getContext('2d');
+const ctx = canvas.getContext('2d', { colorSpace: 'srgb' });
 
 const colourpicker = document.getElementById("{uniqueID}_colorpicker");
 colourpicker.addEventListener("input", (event) =>{
@@ -50,7 +50,7 @@ function saveSettings(){
 }
 
 //Rendering
-function drawPath(){
+async function drawPath(){
 
 	const wid = canvas.width;
     const hei = canvas.height;
@@ -104,11 +104,25 @@ function connect(){
 	listener = path_topic.subscribe((msg) => {
 		let error = false;
 		let newposes = [];
+
+		if(msg.poses == undefined){
+			status.setWarn("Received uninitialized list of poses. Wat.");
+			error = true;
+			return;
+		}
+
 		msg.poses.forEach((point, index) => {
+
+			if(point.header.frame_id == ""){
+				status.setWarn("Transform frame is an empty string, falling back to fixed frame. Fix your publisher ;)");
+				point.header.frame_id = tf.fixed_frame;
+				error = true;
+			}
+
 			const frame = tf.absoluteTransforms[point.header.frame_id];
 	
 			if(!frame){
-				status.setError("Required transform frame not found.");
+				status.setError("Required transform frame \""+point.header.frame_id+"\" not found.");
 				error = true;
 				return;
 			}

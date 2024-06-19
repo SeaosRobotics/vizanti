@@ -60,11 +60,28 @@ function saveSettings(){
 }
 
 const canvas = document.getElementById('{uniqueID}_canvas');
-const ctx = canvas.getContext('2d');
+const ctx = canvas.getContext('2d', { colorSpace: 'srgb' });
 
-function drawRanges() {
+async function drawRanges() {
+
+	function drawCircle(min_size, max_size) {
+		ctx.save();
+        ctx.beginPath();
+        ctx.arc(0, 0, (min_size+max_size)/2, 0, 2 * Math.PI);
+        ctx.closePath();
+		ctx.lineWidth = max_size - min_size;
+        ctx.stroke();
+		ctx.restore();
+	  }
 
 	function drawPizza(start_angle, end_angle, min_len, max_len){
+
+		if(min_len <= 0)
+			min_len = 1;
+
+		if(max_len <= 0)
+			max_len = min_len+1;
+
         ctx.beginPath();
         ctx.arc(0, 0, min_len, start_angle, end_angle);
         ctx.lineTo(max_len * Math.cos(end_angle), max_len * Math.sin(end_angle));
@@ -72,7 +89,7 @@ function drawRanges() {
         ctx.lineTo(min_len * Math.cos(start_angle), min_len * Math.sin(start_angle));
         ctx.closePath();
         ctx.fill();
-	}
+	} 
 
 	const unit = view.getMapUnitsInPixels(1.0);
 
@@ -88,33 +105,53 @@ function drawRanges() {
 		if(new Date() - sample.stamp > decay.value)
 			continue;
 
-		let pos = view.fixedToScreen({
+		if(sample.max_range == 0)
+			continue;
+
+		const pos = view.fixedToScreen({
 			x: sample.pose.translation.x,
 			y: sample.pose.translation.y,
 		});
-	
-		let yaw = sample.pose.rotation.toEuler().h;
 
-		let start_angle = -sample.field_of_view/2;
-		let end_angle = sample.field_of_view/2;
+		const start_angle = -sample.field_of_view/2;
+		const end_angle = sample.field_of_view/2;
 
 		ctx.save();
 		ctx.translate(pos.x, pos.y);
 		ctx.scale(1.0, -1.0);
-		ctx.rotate(yaw);
+		ctx.rotate(sample.yaw);
 
-		ctx.fillStyle = "#33414e96";
-		drawPizza(start_angle, end_angle, unit*sample.min_range, unit*sample.max_range)
+		if(sample.cone_half_width < sample.max_range)
+		{
+			ctx.fillStyle = "#33414e96";
+			drawPizza(start_angle, end_angle, unit*sample.min_range, unit*sample.max_range, unit*sample.cone_half_width)
 
-		ctx.fillStyle = "#5eb4ffff";
-		let minarc = unit*sample.range-10;
+			ctx.fillStyle = "#5eb4ffff";
+			let minarc = unit*sample.range-10;
+	
+			drawPizza(start_angle, end_angle, minarc, unit*sample.range, unit*sample.cone_half_width)
+			
+		}
+		else
+		{
+			ctx.strokeStyle = "#33414e96";
+			const scale = sample.cone_half_width / sample.max_range;
+			const min_range = sample.min_range * scale * unit;
+			const range = sample.range * scale * unit;
 
-		if(minarc < 0)
-			minarc = 10;
+			drawCircle(min_range, unit*sample.cone_half_width);
 
-		drawPizza(start_angle, end_angle, minarc, unit*sample.range)
-		
+			ctx.strokeStyle = "#5eb4ffff";
+			let minarc = range-10;
+			if(minarc < 0)
+				minarc = 1;
+
+			drawCircle(minarc, range)
+
+		}
+
 		ctx.restore();
+		yieldToMainThread();
 
 	}
 }
@@ -151,26 +188,55 @@ function connect(){
 
 	status.setWarn("No data received.");
 	
-	listener = range_topic.subscribe((msg) => {		
+	listener = range_topic.subscribe((msg) => {
+
+		let error = false;
+		if(msg.header.frame_id == ""){
+			status.setWarn("Transform frame is an empty string, falling back to fixed frame. Fix your publisher ;)");
+			msg.header.frame_id = tf.fixed_frame;
+			error = true;
+		}
 
 		const pose = tf.absoluteTransforms[msg.header.frame_id];
 
 		if(!pose){
-			status.setError("Required transform frame not found.");
+			status.setError("Required transform frame \""+msg.header.frame_id+"\" not found.");
 			return;
 		}
 
+		const front_vector = tfModule.applyRotation(
+			{
+				x: msg.max_range, 
+				y: 0,
+				z: 0 
+			}, 
+			pose.rotation, 
+			false
+		);
+
+		//calculate the new values for displaying the cone in a rotated projection
+		const yaw = Math.atan2(front_vector.y, front_vector.x);
+		const ratio = Math.hypot(front_vector.y, front_vector.x) / msg.max_range;
+
+		const cone_half_width = Math.tan(msg.field_of_view * 0.5) * msg.max_range;
+		const ratio_fov = 2 * Math.atan(cone_half_width / (ratio * msg.max_range));
+
 		data[msg.header.frame_id] = {
-			field_of_view: msg.field_of_view,
-			min_range: msg.min_range,
-			max_range: msg.max_range,
-			range: msg.range,
+			yaw: yaw,
+			cone_half_width: cone_half_width,
+			field_of_view: ratio_fov,
+			min_range: ratio * msg.min_range,
+			max_range: ratio * msg.max_range,
+			range: ratio * msg.range,
 			type: msg.radiation_type,
 			pose: pose,
 			stamp: new Date()
 		}
 		drawRanges();
-		status.setOK();
+
+		if(!error){
+			status.setOK();
+		}
 	});
 
 	saveSettings();

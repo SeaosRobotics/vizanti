@@ -23,7 +23,7 @@ let status = new Status(
 );
 
 const canvas = document.getElementById('{uniqueID}_canvas');
-const ctx = canvas.getContext('2d');
+const ctx = canvas.getContext('2d', { colorSpace: 'srgb' });
 
 const icon = document.getElementById("{uniqueID}_icon").getElementsByTagName('img')[0];
 const frameSelector = document.getElementById("{uniqueID}_frame");
@@ -61,7 +61,7 @@ function saveSettings(){
 	settings.save();
 }
 
-function drawRobot() {
+async function drawRobot() {
 
 	const unit = view.getMapUnitsInPixels(lengthSelector.value);
 
@@ -91,7 +91,7 @@ function drawRobot() {
 		ctx.restore();
 		status.setOK();
 	}else{
-		status.setError("Required transform frame not found.");
+		status.setError("Required transform frame \""+frame+"\" not found.");
 	}
 }
 

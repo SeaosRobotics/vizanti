@@ -13,12 +13,27 @@ rospy.init_node('vizanti_flask_node')
 
 param_host = rospy.get_param('~host', '0.0.0.0')
 param_port = rospy.get_param('~port', 5000)
+param_port_rosbridge = rospy.get_param('~port_rosbridge', 5001)
 param_base_url = rospy.get_param('~base_url', '')
+param_default_widget_config = rospy.get_param('~default_widget_config', '')
 
 public_dir = RosPack().get_path('vizanti') + '/public/'
 
 app = Flask(__name__, static_folder=public_dir, template_folder=public_dir)
 app.debug = rospy.get_param('~flask_debug', True)
+
+if param_default_widget_config != "":
+	param_default_widget_config = os.path.expanduser(param_default_widget_config)
+else:
+	param_default_widget_config = os.path.join(app.static_folder, "assets/default_layout.json")
+
+def get_file(path):
+	with open(param_default_widget_config, 'r') as f:
+		file_content = f.read()
+		js_module = f"const content = {json.dumps(file_content)};\nexport default content;"
+		response = make_response(js_module)
+		response.headers['Content-Type'] = 'application/javascript'
+		return response
 
 def get_files(path, valid_extensions):
 	templates_dir = os.path.join(app.static_folder, path)
@@ -65,6 +80,21 @@ def list_template_files():
 @app.route(param_base_url + '/assets/robot_model/paths')
 def list_robot_model_files():
 	return get_paths("assets/robot_model", ['.png'])
+
+@app.route(param_base_url + '/ros_launch_params')
+def list_ros_launch_params():
+    params = {
+        "port": param_port,
+        "port_rosbridge": param_port_rosbridge
+    }
+    js_module = f"const params = {json.dumps(params)};\n\nexport default params;"
+    response = make_response(js_module)
+    response.headers['Content-Type'] = 'application/javascript'
+    return response
+
+@app.route(param_base_url + '/default_widget_config')
+def get_default_widget_config():
+	return get_file(param_default_widget_config)
 
 @app.route(param_base_url + '/<path:path>')
 def serve_static(path):

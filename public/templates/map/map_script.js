@@ -63,11 +63,25 @@ let status = new Status(
 let icons = {};
 icons["map"] = await imageToDataURL("assets/map.svg");
 icons["costmap"] = await imageToDataURL("assets/costmap.svg");
+icons["raw"] = await imageToDataURL("assets/rawmap.svg");
 
 let listener = undefined;
 let map_topic = undefined;
 let map_data = undefined;
-let map_canvas = undefined;
+let new_map_data = undefined;
+
+let received_msg = undefined;
+
+//firefox bug workaround
+const temp_canvas = document.createElement('canvas');
+
+const worker_thread = new Worker(`${base_url}/templates/map/map_worker.js`);
+const map_canvas = document.createElement('canvas');
+
+//offscreen rendering is currently half broken in firefox
+//https://bugzilla.mozilla.org/show_bug.cgi?id=1833496
+const offscreen_canvas = map_canvas.transferControlToOffscreen();
+worker_thread.postMessage({	canvas: offscreen_canvas}, [offscreen_canvas]);
 
 const selectionbox = document.getElementById("{uniqueID}_topic");
 const icon = document.getElementById("{uniqueID}_icon").getElementsByTagName('img')[0];
@@ -81,8 +95,19 @@ const savePathBox = document.getElementById("{uniqueID}_savepath");
 const loadButton = document.getElementById('{uniqueID}_load');
 const saveButton = document.getElementById('{uniqueID}_save');
 
-const costmapCheckbox = document.getElementById('{uniqueID}_costmap_mode');
-costmapCheckbox.addEventListener('change', saveSettings);
+//rendring colour modes: 0 = map, 1 = costmap, 2 = raw
+const colourSchemeBox = document.getElementById('{uniqueID}_colour_scheme');
+colourSchemeBox.selectedIndex = topic.includes("cost") ? 1 : 0;
+colourSchemeBox.addEventListener('change', saveSettings);
+
+const timestampCheckbox = document.getElementById('{uniqueID}_use_timestamp');
+timestampCheckbox.addEventListener('change', saveSettings);
+
+const throttle = document.getElementById('{uniqueID}_throttle');
+throttle.addEventListener("input", (event) =>{
+	saveSettings();
+	connect();
+});
 
 loadButton.addEventListener('click',  async () => {
 	let path = loadPathBox.value;
@@ -128,7 +153,7 @@ opacitySlider.addEventListener('input', () =>  {
 });
 
 const canvas = document.getElementById('{uniqueID}_canvas');
-const ctx = canvas.getContext('2d');
+const ctx = canvas.getContext('2d', { colorSpace: 'srgb' });
 
 if(settings.hasOwnProperty("{uniqueID}")){
 	const loaded_data  = settings["{uniqueID}"];
@@ -137,73 +162,75 @@ if(settings.hasOwnProperty("{uniqueID}")){
 	opacitySlider.value = loaded_data.opacity;
 	opacityValue.innerText = loaded_data.opacity;
 
-	costmapCheckbox.checked =  loaded_data.costmap_mode ?? false;
-
-	if(costmapCheckbox.checked){
-		icon.src = icons["costmap"];
+	if(loaded_data.costmap_mode !== undefined){
+		colourSchemeBox.selectedIndex = loaded_data.costmap_mode ? 1 : 0;
 	}else{
-		icon.src = icons["map"];
+		colourSchemeBox.selectedIndex = loaded_data.colour_scheme > 0 ? loaded_data.colour_scheme: 0;
 	}
+
+	timestampCheckbox.checked = loaded_data.use_timestamp ?? false;
+	throttle.value = loaded_data.throttle ?? 1000;
 
 }else{
 	saveSettings();
 }
 
+icon.src = icons[colourSchemeBox.value];
+
 function saveSettings(){
 	settings["{uniqueID}"] = {
 		topic: topic,
 		opacity: opacitySlider.value,
-		costmap_mode: costmapCheckbox.checked
+		colour_scheme: colourSchemeBox.selectedIndex,
+		throttle: throttle.value,
+		use_timestamp: timestampCheckbox.checked
 	}
 	settings.save();
 }
 
 //Rendering
 
-function drawMap(){
-	const wid = canvas.width;
-    const hei = canvas.height;
+async function drawMap(){
 
-	ctx.clearRect(0, 0, wid, hei);
-	ctx.imageSmoothingEnabled = false;
-
-	if(!map_canvas)
+	if(!map_data)
 		return;
 
 	const map_width = view.getMapUnitsInPixels(
-		map_canvas.width * map_data.info.resolution
+		temp_canvas.width * map_data.info.resolution
 	);
 
 	const map_height = view.getMapUnitsInPixels(
-		map_canvas.height * map_data.info.resolution
+		temp_canvas.height * map_data.info.resolution
 	);
 
-	const frame = tf.absoluteTransforms[map_data.header.frame_id];
+	let tf_pose = map_data.pose;
 
-	if(frame){
-
-		let transformed = tf.transformPose(
+	if(!timestampCheckbox.checked){
+		tf_pose = tf.transformPose(
 			map_data.header.frame_id,
 			tf.fixed_frame,
 			map_data.info.origin.position,
 			map_data.info.origin.orientation
 		);
-
-		const pos = view.fixedToScreen({
-			x: transformed.translation.x,
-			y: transformed.translation.y,
-		});
-	
-		const yaw = transformed.rotation.toEuler().h;
-
-		ctx.save();
-		ctx.globalAlpha = opacitySlider.value;
-		ctx.translate(pos.x, pos.y);
-		ctx.scale(1.0, -1.0);
-		ctx.rotate(yaw);
-		ctx.drawImage(map_canvas, 0, 0, map_width, map_height);
-		ctx.restore();
 	}
+
+	const pos = view.fixedToScreen({
+		x: tf_pose.translation.x,
+		y: tf_pose.translation.y,
+	});
+
+	const yaw = tf_pose.rotation.toEuler().h;
+
+	ctx.clearRect(0, 0, canvas.width, canvas.height);
+	ctx.imageSmoothingEnabled = false;
+
+	ctx.save();
+	ctx.globalAlpha = opacitySlider.value;
+	ctx.translate(pos.x, pos.y);
+	ctx.scale(1.0, -1.0);
+	ctx.rotate(yaw);
+	ctx.drawImage(temp_canvas, 0, 0, map_width, map_height);
+	ctx.restore();
 }
 
 //Topic
@@ -223,95 +250,64 @@ function connect(){
 		ros : rosbridge.ros,
 		name : topic,
 		messageType : 'nav_msgs/OccupancyGrid',
-		throttle_rate: 1000, // throttle to once every second max
+		throttle_rate: parseInt(throttle.value), // throttle to once every second max
 		compression: "cbor"
-		
 	});
 
 	status.setWarn("No data received.");
+
+	worker_thread.onmessage = (e) => {
+		setTimeout(()=>{
+
+			const img = e.data.image
+			temp_canvas.width = img.width
+			temp_canvas.height = img.height
+			temp_canvas.getContext('2d', { colorSpace: 'srgb' }).putImageData(img, 0, 0);
+			map_data = new_map_data;
+			drawMap();
+			status.setOK();
+		},12);
+	};
 	
 	listener = map_topic.subscribe((msg) => {
 
-		map_data = msg;
-		map_canvas = document.createElement('canvas');
-
-		const mapctx = map_canvas.getContext('2d');
-
-		const width = msg.info.width;
-		const height = msg.info.height;
-		const data = msg.data;
-
-		if(width == 0 || height == 0){
+		if(msg.info.width == 0 || msg.info.height == 0){
 			status.setWarn("Received empty map.");
 			return;
 		}
-	  
-		map_canvas.width = width;
-		map_canvas.height = height;
-	  
-		let map_img = mapctx.createImageData(width, height);
-	  
-		if(costmapCheckbox.checked)
-		{
-			// Iterate through the data array and set the canvas pixel colors
-			for (let i = 0; i < data.length; i++) {
-				let occupancyValue = data[i];
-				let color = 255; // White for unknown
 
-				if(occupancyValue < 0)
-					occupancyValue = 0;
-
-				color = (occupancyValue * 255) / 100;
-
-				if(occupancyValue == 100){
-					map_img.data[i * 4] = 255; // R
-					map_img.data[i * 4 + 1] = 0; // G
-					map_img.data[i * 4 + 2] = 128; // B
-					map_img.data[i * 4 + 3] = 255; // A
-				}
-				else if(occupancyValue > 80){
-					map_img.data[i * 4] = 0; // R
-					map_img.data[i * 4 + 1] = 255; // G
-					map_img.data[i * 4 + 2] = 255; // B
-					map_img.data[i * 4 + 3] = 255; // A
-				}
-				else{
-					map_img.data[i * 4] = color; // R
-					map_img.data[i * 4 + 1] = 0; // G
-					map_img.data[i * 4 + 2] = 255-color; // B
-					map_img.data[i * 4 + 3] = parseInt(occupancyValue*2.55); // A
-				}
-			}
-		}
-		else
-		{
-			// Iterate through the data array and set the canvas pixel colors
-			for (let i = 0; i < data.length; i++) {
-				let occupancyValue = data[i];
-				let color = 255; // White for unknown
-
-				if(occupancyValue < 0)
-					occupancyValue = 50;
-
-				if (occupancyValue >= 0 && occupancyValue <= 100) {
-					color = 255 - (occupancyValue * 255) / 100;
-				}
-
-				map_img.data[i * 4] = color; // R
-				map_img.data[i * 4 + 1] = color; // G
-				map_img.data[i * 4 + 2] = color; // B
-				map_img.data[i * 4 + 3] = 255; // A
-			}
+		if(msg.header.frame_id == ""){
+			status.setWarn("Transform frame is an empty string, falling back to fixed frame. Fix your publisher ;)");
+			msg.header.frame_id = tf.fixed_frame;
 		}
 
-		mapctx.putImageData(map_img, 0, 0);
+		if(!tf.absoluteTransforms[msg.header.frame_id]){
+			status.setError("Required transform frame \""+msg.header.frame_id+"\" not found.");
+			return;
+		}
 
-		drawMap();
-
-		status.setOK();
+		queueWorkerMsg(msg);
+		received_msg = msg;
 	});
 
 	saveSettings();
+}
+
+function queueWorkerMsg(msg){
+	msg.pose = tf.transformPose(
+		msg.header.frame_id,
+		tf.fixed_frame,
+		msg.info.origin.position,
+		msg.info.origin.orientation
+	);
+
+	new_map_data = msg;
+	map_data = undefined;
+
+	worker_thread.postMessage({
+		map_msg: msg,
+		colour_scheme: colourSchemeBox.value,
+	});
 }
 
 async function loadTopics(){
@@ -337,19 +333,18 @@ async function loadTopics(){
 	connect();
 }
 
-costmapCheckbox.addEventListener("change", (event) => {
-	status.setWarn("Display mode changed, waiting for map data...");
-	if(costmapCheckbox.checked){
-		icon.src = icons["costmap"];
-	}else{
-		icon.src = icons["map"];
-	}
+colourSchemeBox.addEventListener("change", (event) => {
+	icon.src = icons[colourSchemeBox.value];
+	queueWorkerMsg(received_msg);
 });
 
 selectionbox.addEventListener("change", (event) => {
 	topic = selectionbox.value;
+
 	map_data = undefined;
-	map_canvas = undefined;
+	ctx.clearRect(0, 0, canvas.width, canvas.height);
+	ctx.imageSmoothingEnabled = false;
+
 	connect();
 });
 

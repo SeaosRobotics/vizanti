@@ -21,21 +21,63 @@ export class Navsat {
 		this.queue = new Set();
 		this.queue_history = new Set();
 
-		this.loadingloop = setInterval(async ()=>{
+		this.download_queue = new Set();
+		this.currently_downloading = new Set();
 
-			if(this.queue.size == 0)
-				return;
+		this.loadingloop = async ()=>{
 
 			let items = Array.from(this.queue);
-			let tile = items[Math.floor(Math.random() * items.length)];
+			for(let tile_url of items){
+				
+				//we already got it?
+				if(this.live_cache[tile_url] !== undefined){
+					this.queue.delete(tile_url);
+					continue;
+				}
 
-			let loaded = await this.loadTile(tile);
-			if(loaded){
-				this.live_cache[tile] = loaded;
-				this.queue.delete(tile);
+				//check the indexed DB
+				if(Boolean(await db.keyExists(tile_url))){
+					const data = await db.getObject(tile_url);
+					this.live_cache[tile_url] = await dataToImage(data);
+					this.queue.delete(tile_url);
+					continue;
+				}
+
+				//hit up the CDN
+				this.download_queue.add(tile_url);
 			}
 
-		}, 300);
+			setTimeout(this.loadingloop, 100);
+		}
+		this.loadingloop();
+
+		this.downloadingloop = async ()=>{
+
+			const attemptDownload = async (tile_url) => {
+				//download from tile server, in case there's no internet we don't hang forever
+				const timeout = new Promise(resolve => setTimeout(() => resolve(undefined), 4000));
+				const data = await Promise.race([imageToDataURL(tile_url), timeout]);
+			
+				if (data) {
+					await db.setObject(tile_url, data);
+					this.live_cache[tile_url] = await dataToImage(data);
+					this.download_queue.delete(tile_url);
+				}
+
+				this.currently_downloading.delete(tile_url);
+			}
+			
+			// Inside your loop
+			let items = Array.from(this.download_queue);
+			for (let tile_url of items) {
+				if(tile_url && !this.currently_downloading.has(tile_url)){
+					this.currently_downloading.add(tile_url);
+					attemptDownload(tile_url);
+				}
+			}
+			setTimeout(this.downloadingloop, 500);
+		}
+		this.downloadingloop();
 	}
 
 	async enqueue(keyurl){
@@ -43,15 +85,13 @@ export class Navsat {
 			return;
 
 		this.queue_history.add(keyurl);
+		this.queue.add(keyurl);
+	}
 
-		if(Boolean(await db.keyExists(keyurl))){
-			const data = await db.getObject(keyurl);
-			this.live_cache[keyurl] = await dataToImage(data);
-			//console.log("Tile loaded from DB",keyurl)
-		}else{
-			//console.log("Tile Queued",keyurl)
-			this.queue.add(keyurl);
-		}
+	async clear_queue(keyurl){
+		this.queue = new Set();
+		this.queue_history = new Set();
+		this.download_queue = new Set();
 	}
 
 	//https://wiki.openstreetmap.org/wiki/Slippy_map_tilenames
@@ -70,31 +110,6 @@ export class Navsat {
 		};
 	}
 
-	async fetchURL(url){
-		console.log("Fetching tile data:",url);
-
-		const data = await imageToDataURL(url);
-		if (!data) {
-			return undefined;
-		}
-
-		db.setObject(url, data);
-		return data;
-	}
-
-	async loadTile(keyurl) {
-		const data = await this.fetchURL(keyurl);
-		if(data){
-			let image = new Image();
-			image.src = data;
-			return new Promise((resolve, reject) => {
-				image.onload = () => resolve(image);
-				image.onerror = () => resolve(undefined);
-			});
-		}
-		return undefined;
-	}
-
 	metersToDegrees(meters, latitude, zoomLevel) {
 		const earthRadius = 6378137; // Earth radius in meters
 	
@@ -102,7 +117,7 @@ export class Navsat {
 		const metersPerPixel = (2 * Math.PI * earthRadius * Math.cos(latitude * Math.PI / 180)) / (this.tile_size * Math.pow(2, zoomLevel));
 	
 		// Convert the distance in meters to degrees	
-		return meters / metersPerPixel;;
+		return meters / metersPerPixel;
 	}
 
 	tileSizeInMeters(latitude, zoom) {

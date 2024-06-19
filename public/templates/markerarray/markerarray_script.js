@@ -25,7 +25,7 @@ const selectionbox = document.getElementById("{uniqueID}_topic");
 const icon = document.getElementById("{uniqueID}_icon").getElementsByTagName('img')[0];
 
 const canvas = document.getElementById('{uniqueID}_canvas');
-const ctx = canvas.getContext('2d');
+const ctx = canvas.getContext('2d', { colorSpace: 'srgb' });
 
 //Settings
 if(settings.hasOwnProperty("{uniqueID}")){
@@ -90,7 +90,7 @@ function rgbaToFillColor(rosColorRGBA) {
 	return `rgba(${r255}, ${g255}, ${b255}, ${a})`;
 }
 
-function drawMarkers(){
+async function drawMarkers(){
 
 	function drawCircle(marker, size){
 		ctx.scale(marker.scale.x, marker.scale.y);
@@ -178,19 +178,12 @@ function drawMarkers(){
 		if((current_time - marker.stamp)/1000.0 > marker.lifetime.sec + marker.lifetime.nanosec*1e-9)
 			continue;
 
-		let transformed = tf.transformPose(
-			marker.header.frame_id, 
-			tf.fixed_frame, 
-			marker.pose.position, 
-			marker.pose.orientation
-		);
-
 		const pos = view.fixedToScreen({
-			x: transformed.translation.x,
-			y: transformed.translation.y
+			x: marker.transformed.translation.x,
+			y: marker.transformed.translation.y
 		});
 
-		const yaw = transformed.rotation.toEuler().h;
+		const yaw = marker.transformed.rotation.toEuler().h;
 
 		ctx.save();
 		ctx.translate(pos.x, pos.y);
@@ -240,6 +233,8 @@ function connect(){
 	status.setWarn("No data received.");
 	
 	listener = marker_topic.subscribe((msg) => {
+
+		let error = false;
 		msg.markers.forEach(m => {
 			if(m.action == 3){
 				markers = {};
@@ -254,13 +249,30 @@ function connect(){
 			}
 
 			const q = m.pose.orientation;
-			if(q.x == 0 && q.y == 0 && q.z == 0 && q.w == 0)
+			if(q.x == 0 && q.y == 0 && q.z == 0 && q.w == 0){
 				m.pose.orientation = new Quaternion();
-		
+			}
+
+			if(m.header.frame_id == ""){
+				status.setWarn("Transform frame is an empty string, falling back to fixed frame. Fix your publisher ;)");
+				m.header.frame_id = tf.fixed_frame;
+				error = true;
+			}
+
+			m.transformed = tf.transformPose(
+				m.header.frame_id, 
+				tf.fixed_frame, 
+				m.pose.position, 
+				m.pose.orientation
+			);
+
 			m.stamp = new Date();	
 			markers[id] = m;
 		});
-		status.setOK();
+
+		if(!error){
+			status.setOK();
+		}
 		drawMarkers();
 	});
 

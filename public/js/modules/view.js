@@ -28,8 +28,8 @@ function hasClassInParentChain(element, className) {
 	return hasClassInParentChain(element.parentElement, className);
 }
 
-const MAX_SCALE = 10000;
-const MIN_SCALE = 3.0;
+const MAX_SCALE = 5000;
+const MIN_SCALE = 0.001;
 const ZOOM_FACTOR = 1.05;
 
 export class View {
@@ -44,9 +44,33 @@ export class View {
 		this.drag_start = undefined;
 		this.input_movement = true;
 
-		document.addEventListener("DOMContentLoaded", () => {
+		if (document.readyState !== 'loading') {
 			this.addListeners();
-		});
+		} else {
+			document.addEventListener('DOMContentLoaded', function () {
+				this.addListeners();
+			});
+		}
+
+		this.event_timestamp = performance.now();
+		this.event_timeout = undefined;
+	}
+
+	async sendUpdateEvent(){
+
+		if (this.event_timeout !== undefined) {
+			clearTimeout(this.event_timeout);
+		}
+		const delta = performance.now() - this.event_timestamp
+
+		if(delta > 12){
+			window.dispatchEvent(new Event("view_changed"));
+			this.event_timestamp = performance.now();
+		}else{
+			this.event_timeout = setTimeout(() => {
+				window.dispatchEvent(new Event("view_changed"));
+			}, 12 - delta);
+		}
 	}
 
 	setInputMovementEnabled(value){
@@ -61,7 +85,7 @@ export class View {
 		settings.view.center = this.center;
 		settings.view.scale = this.scale;
 		settings.save();
-		window.dispatchEvent(new Event("view_changed"));
+		this.sendUpdateEvent();
 	}
 
 	fixedToScreen(coords) {
@@ -147,7 +171,7 @@ export class View {
 
 		settings.view.center = this.center;
 		settings.save();
-		window.dispatchEvent(new Event("view_changed"));
+		this.sendUpdateEvent();
 	}
 	
 	handleDragEnd() {
@@ -194,8 +218,7 @@ export class View {
 		settings.view.center = this.center;
 		settings.view.scale = this.scale;
 		settings.save();
-	
-		window.dispatchEvent(new Event("view_changed"));
+		this.sendUpdateEvent();
 	}
 
 	addListeners(){

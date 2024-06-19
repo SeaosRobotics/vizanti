@@ -12,7 +12,7 @@ let status = new Status(
 );
 
 const canvas = document.getElementById('{uniqueID}_canvas');
-const ctx = canvas.getContext('2d');
+const ctx = canvas.getContext('2d', { colorSpace: 'srgb' });
 
 let grid_size = 1.0;
 let grid_thickness = 1;
@@ -36,11 +36,10 @@ function saveSettings(){
 	settings.save();
 }
 
-function drawGrid() {
+async function drawGrid() {
     const wid = canvas.width;
     const hei = canvas.height;
 
-    ctx.clearRect(0, 0, wid, hei);
     ctx.strokeStyle = grid_colour;
 	ctx.lineWidth = grid_thickness;
 
@@ -57,6 +56,7 @@ function drawGrid() {
 	const linesY = (maxY-minY)/grid_size;
 
 	if(linesX > 200 || linesY > 200){
+		ctx.clearRect(0, 0, wid, hei);
 		status.setWarn("Too many lines to render, increase step size.");
 		return;
 	}
@@ -95,6 +95,7 @@ function drawGrid() {
         ctx.lineTo(parseInt(to.x), parseInt(to.y));
     }
 
+	ctx.clearRect(0, 0, wid, hei);
 	ctx.stroke();
 
 	status.setOK();
@@ -139,8 +140,8 @@ linethickness.addEventListener("input", (event) =>{
 });
 
 gridstep.addEventListener("input", (event) =>{
-	if(gridstep.value > 10000)
-		grid_size = 10000;	
+	if(gridstep.value > 1000000)
+		grid_size = 1000000;	
 	else if(gridstep.value < 0.01)
 		grid_size = 0.01;	
 	else if(isNaN(gridstep.value))

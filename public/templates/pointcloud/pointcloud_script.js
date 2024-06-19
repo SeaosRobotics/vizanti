@@ -77,9 +77,9 @@ function saveSettings(){
 }
 
 const canvas = document.getElementById('{uniqueID}_canvas');
-const ctx = canvas.getContext('2d');
+const ctx = canvas.getContext('2d', { colorSpace: 'srgb' });
 
-function drawCloud() {
+async function drawCloud() {
 
 	const pixel = view.getMapUnitsInPixels(thicknessSlider.value);
 
@@ -158,10 +158,17 @@ function connect(){
 
 	listener = range_topic.subscribe((msg) => {	
 
+		let error = false;
+		if(msg.header.frame_id == ""){
+			status.setWarn("Transform frame is an empty string, falling back to fixed frame. Fix your publisher ;)");
+			msg.header.frame_id = tf.fixed_frame;
+			error = true;
+		}
+
 		const pose = tf.absoluteTransforms[msg.header.frame_id];
 
 		if(!pose){
-			status.setError("Required transform frame not found.");
+			status.setError("Required transform frame \""+msg.header.frame_id+"\" not found.");
 			return;
 		}
 
@@ -206,8 +213,11 @@ function connect(){
 		if(pointarray.length > 0){
 			data = {};
 			data.pose = pose;
-			data.points = pointarray;
-			status.setOK();
+			data.points = pointarray;			
+			drawCloud();
+			if(!error){
+				status.setOK();
+			}
 		}
 	});
 
