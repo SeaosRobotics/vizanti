@@ -124,3 +124,20 @@ export function groupStringsByPrefix(strings, minPrefixLength=2) {
 		return 0;
 	});
 }
+
+//SVG icons must have the objects that should be recolored flagged with id="fillColor" or id="strokeColor" depending on which part needs coloring
+export function setIconColor(icon, hexcol){
+	if (icon && icon.contentDocument) {
+		const svgDoc = icon.contentDocument;
+		const fillChange = svgDoc.querySelectorAll("#fillColor");
+		for(let i = 0; i < fillChange.length; i++){
+			fillChange[i].style.fill = hexcol;
+		}
+
+		const strokeChange = svgDoc.querySelectorAll("#strokeColor");
+		for(let i = 0; i < strokeChange.length; i++){
+			strokeChange[i].style.stroke = hexcol;
+		}
+		icon.dataset.color = hexcol;
+	}
+}

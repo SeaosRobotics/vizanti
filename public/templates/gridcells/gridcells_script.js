@@ -3,6 +3,7 @@ let tfModule = await import(`${base_url}/js/modules/tf.js`);
 let rosbridgeModule = await import(`${base_url}/js/modules/rosbridge.js`);
 let persistentModule = await import(`${base_url}/js/modules/persistent.js`);
 let StatusModule = await import(`${base_url}/js/modules/status.js`);
+let utilModule = await import(`${base_url}/js/modules/util.js`);
 
 let view = viewModule.view;
 let tf = tfModule.tf;
@@ -22,7 +23,8 @@ let listener = undefined;
 let data = undefined;
 
 const selectionbox = document.getElementById("{uniqueID}_topic");
-const icon = document.getElementById("{uniqueID}_icon").getElementsByTagName('img')[0];
+const click_icon = document.getElementById("{uniqueID}_icon");
+const icon = click_icon.getElementsByTagName('object')[0];
 
 const timestampCheckbox = document.getElementById('{uniqueID}_use_timestamp');
 timestampCheckbox.addEventListener('change', saveSettings);
@@ -32,11 +34,14 @@ const opacityValue = document.getElementById('{uniqueID}_opacity_value');
 opacitySlider.addEventListener('input', () =>  {
 	opacityValue.textContent = opacitySlider.value;
 	saveSettings();
+	drawCells();
 });
 
 const colourpicker = document.getElementById("{uniqueID}_colorpicker");
 colourpicker.addEventListener("input", (event) =>{
+	utilModule.setIconColor(icon, colourpicker.value);
 	saveSettings();
+	drawCells();
 });
 
 const throttle = document.getElementById('{uniqueID}_throttle');
@@ -46,7 +51,6 @@ throttle.addEventListener("input", (event) =>{
 });
 
 //Settings
-
 if(settings.hasOwnProperty("{uniqueID}")){
 	const loaded_data  = settings["{uniqueID}"];
 	topic = loaded_data.topic;
@@ -61,6 +65,15 @@ if(settings.hasOwnProperty("{uniqueID}")){
 }else{
 	saveSettings();
 }
+
+//update the icon colour when it's loaded or when the image source changes
+icon.onload = () => {
+	utilModule.setIconColor(icon, colourpicker.value);
+};
+if (icon.contentDocument) {
+	utilModule.setIconColor(icon, colourpicker.value);
+}
+
 
 function saveSettings(){
 	settings["{uniqueID}"] = {
@@ -92,8 +105,9 @@ async function drawCells() {
 
 	let tf_pose = timestampCheckbox.checked ? data.pose : tf.absoluteTransforms[data.msg.header.frame_id];
 
-	if(tf_pose == undefined)
+	if(!tf_pose){
 		return;
+	}
 
 	const pos = view.fixedToScreen({
 		x: tf_pose.translation.x,
@@ -110,10 +124,17 @@ async function drawCells() {
 	const wid = Math.abs(data.msg.cell_width) * unit;
 	const hei = Math.abs(data.msg.cell_height) * unit;
 
+	ctx.beginPath();
 	for(let i = 0; i < data.msg.cells.length; i++){
-		ctx.fillRect(data.msg.cells[i].x * unit - wid/2 + 1, data.msg.cells[i].y * unit - hei/2 + 1, wid-1, hei-1);
+		const x = data.msg.cells[i].x * unit - wid / 2 + 1;
+		const y = data.msg.cells[i].y * unit - hei / 2 + 1;
+		ctx.moveTo(x, y);
+		ctx.lineTo(x + wid - 1, y);
+		ctx.lineTo(x + wid - 1, y + hei - 1);
+		ctx.lineTo(x, y + hei - 1);
+		ctx.lineTo(x, y);
 	}
-	
+	ctx.fill();
 	ctx.restore();
 }
 
@@ -123,7 +144,13 @@ function resizeScreen(){
 	drawCells();
 }
 
-window.addEventListener("tf_changed", drawCells);
+window.addEventListener("tf_fixed_frame_changed", drawCells);
+window.addEventListener("tf_changed", ()=>{
+	if (data && data.msg.frame_id != tf.fixed_frame){
+		drawCells();
+	}
+});
+
 window.addEventListener("view_changed", drawCells);
 window.addEventListener('resize', resizeScreen);
 window.addEventListener('orientationchange', resizeScreen);
@@ -218,9 +245,9 @@ selectionbox.addEventListener("change", (event) => {
 });
 
 selectionbox.addEventListener("click", connect);
-icon.addEventListener("click", loadTopics);
+click_icon.addEventListener("click", loadTopics);
 
 loadTopics();
 resizeScreen();
 
-console.log("Laserscan Widget Loaded {uniqueID}")
+console.log("Gridcells Widget Loaded {uniqueID}")

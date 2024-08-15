@@ -1,4 +1,4 @@
-<div id="modal_add_element" class="modal_outer noselect">
+<div id="modal_add_element" class="modal_outer noselect" style="z-index:10">
 	<div class="modal_inner noselect">
 		<h3>Add Widgets</h3>
 		
@@ -71,6 +71,14 @@
 				</div>
 			</div>
 
+			<div class="widget_entry" onclick="addWidget('folder','')">
+				<img src="assets/folder.svg" alt="Folder" class="card_icon">
+				<div class="card">
+					<b class="card_title">Folder</b>
+					<p class="card_desc">Group your widgets together</p>
+				</div>
+			</div>
+
 			<hr>
 
 			<div class="widget_entry" onclick="addWidget('teleop','')" data-topic="geometry_msgs/Twist">
@@ -118,6 +126,14 @@
 				<div class="card">
 					<b class="card_title">Button</b>
 					<p class="card_desc">Display and toggle [std_msgs/Bool], or send [std_msgs/Empty]</p>
+				</div>
+			</div>
+
+			<div class="widget_entry" onclick="addWidget('altimeter','')" data-topic="std_msgs/Float32">
+				<img src="assets/altimeter.svg" alt="Altimeter" class="card_icon">
+				<div class="card">
+					<b class="card_title">Altimeter</b>
+					<p class="card_desc">Track Z height of a TF link, send a [std_msgs/Float32] target.</p>
 				</div>
 			</div>
 
@@ -198,11 +214,11 @@
 				</div>
 			</div>
 
-			<div class="widget_entry" onclick="addWidget('posewithcovariancestamped','')" data-topic="geometry_msgs/PoseWithCovarianceStamped">
+			<div class="widget_entry" onclick="addWidget('posewithcovariancestamped','')" data-topic="geometry_msgs/PoseWithCovarianceStamped,geometry_msgs/PoseStamped">
 				<img src="assets/posewithcovariancestamped.svg" alt="PoseCovStamped" class="card_icon">
 				<div class="card">
-					<b class="card_title">Pose with Covariance (Stamped)</b>
-					<p class="card_desc">geometry_msgs/PoseWithCovarianceStamped</p>
+					<b class="card_title">Pose</b>
+					<p class="card_desc">geometry_msgs/PoseWithCovarianceStamped, geometry_msgs/PoseStamped</p>
 				</div>
 			</div>
 

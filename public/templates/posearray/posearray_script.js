@@ -3,6 +3,7 @@ let tfModule = await import(`${base_url}/js/modules/tf.js`);
 let rosbridgeModule = await import(`${base_url}/js/modules/rosbridge.js`);
 let persistentModule = await import(`${base_url}/js/modules/persistent.js`);
 let StatusModule = await import(`${base_url}/js/modules/status.js`);
+let utilModule = await import(`${base_url}/js/modules/util.js`);
 
 let view = viewModule.view;
 let tf = tfModule.tf;
@@ -27,17 +28,21 @@ const scaleSliderValue = document.getElementById('{uniqueID}_scale_value');
 
 scaleSlider.addEventListener('input', function () {
 	scaleSliderValue.textContent = this.value;
+	drawArrows();
 });
 
 scaleSlider.addEventListener('change', saveSettings);
 
 const colourpicker = document.getElementById("{uniqueID}_colorpicker");
 colourpicker.addEventListener("input", (event) =>{
+	utilModule.setIconColor(icon, colourpicker.value);
 	saveSettings();
+	drawArrows();
 });
 
 const selectionbox = document.getElementById("{uniqueID}_topic");
-const icon = document.getElementById("{uniqueID}_icon").getElementsByTagName('img')[0];
+const click_icon = document.getElementById("{uniqueID}_icon");
+const icon = click_icon.getElementsByTagName('object')[0];
 
 const canvas = document.getElementById('{uniqueID}_canvas');
 const ctx = canvas.getContext('2d', { colorSpace: 'srgb' });
@@ -47,12 +52,21 @@ if(settings.hasOwnProperty("{uniqueID}")){
 	const loaded_data  = settings["{uniqueID}"];
 	topic = loaded_data.topic;
 
-	colourpicker.value = loaded_data.color ?? "#8B0000";
+	colourpicker.value = loaded_data.color ?? "#f74127";
 
 	scaleSlider.value = loaded_data.scale;
 	scaleSliderValue.textContent = scaleSlider.value;
+
 }else{
 	saveSettings();
+}
+
+//update the icon colour when it's loaded or when the image source changes
+icon.onload = () => {
+	utilModule.setIconColor(icon, colourpicker.value);
+};
+if (icon.contentDocument) {
+	utilModule.setIconColor(icon, colourpicker.value);
 }
 
 function saveSettings(){
@@ -68,13 +82,7 @@ function saveSettings(){
 
 async function drawArrows(){
 
-	function drawArrow(size){
-		const height = parseInt(size*0.5);
-		const width = parseInt(size*0.01)+1;
-		const tip = parseInt(size*0.07)+1;
-		const tipwidth = parseInt(size*0.07)+1;
-
-		ctx.beginPath();
+	function drawArrow(height, width, tip, tipwidth){
 		ctx.moveTo(0, -width);
 		ctx.lineTo(height - tip, -width);
 		ctx.lineTo(height - tip, -tipwidth);
@@ -83,7 +91,6 @@ async function drawArrows(){
 		ctx.lineTo(height - tip, width);
 		ctx.lineTo(0, width);
 		ctx.lineTo(0, -width);
-		ctx.fill();
 	}
 
 	const unit = view.getMapUnitsInPixels(1.0);
@@ -91,14 +98,20 @@ async function drawArrows(){
 	const wid = canvas.width;
     const hei = canvas.height;
 
-	const scale = unit*parseFloat(scaleSlider.value);
+	const scale = unit * parseFloat(scaleSlider.value);
+	const arrow_height = parseInt(scale*0.5);
+	const arrow_width = parseInt(scale*0.01)+1;
+	const arrow_tip = parseInt(scale*0.07)+1;
+	const arrow_tipwidth = parseInt(scale*0.07)+1;
 
 	ctx.clearRect(0, 0, wid, hei);
 	ctx.fillStyle = colourpicker.value;
 
-	if(frame === tf.fixed_frame){
-		poses.forEach((p) => {
+	if(frame === tf.fixed_frame && poses.length > 0){
+		ctx.beginPath();
 
+		for (let i = 0; i < poses.length; i++) {
+			const p = poses[i];
 			const screenpos = view.fixedToScreen(p);
 
 			ctx.save();
@@ -106,10 +119,12 @@ async function drawArrows(){
 			ctx.scale(1, -1);
 			ctx.rotate(p.yaw);
 
-			drawArrow(scale);
+			drawArrow(arrow_height, arrow_width, arrow_tip, arrow_tipwidth);
 
 			ctx.restore();
-		});
+		}
+
+		ctx.fill();
 	}
 }
 
@@ -201,7 +216,7 @@ async function loadTopics(){
 
 selectionbox.addEventListener("change", (event) => {
 	topic = selectionbox.value;
-	markers = {};
+	poses = [];
 	connect();
 });
 
@@ -209,7 +224,7 @@ selectionbox.addEventListener("click", (event) => {
 	connect();
 });
 
-icon.addEventListener("click", (event) => {
+click_icon.addEventListener("click", (event) => {
 	loadTopics();
 });
 
@@ -221,7 +236,7 @@ function resizeScreen(){
 	drawArrows();
 }
 
-window.addEventListener("tf_changed", drawArrows);
+window.addEventListener("tf_fixed_frame_changed", drawArrows);
 window.addEventListener("view_changed", drawArrows);
 window.addEventListener('resize', resizeScreen);
 window.addEventListener('orientationchange', resizeScreen);
