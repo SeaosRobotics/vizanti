@@ -36,7 +36,7 @@ startButton.addEventListener('click', ()=>{
 });
 
 saveButton.addEventListener('click', ()=>{
-	window.parent.postMessage({ action: 'response', data: 'Hello from iframe' }, '*');
+	window.parent.postMessage({ action: 'pipe', data: 'Hello from iframe' }, '*');
 });
 
 const flipButton = document.getElementById("{uniqueID}_flip");
@@ -118,6 +118,27 @@ function getStamp(){
 
 function sendMessage(pointlist){
 	let timeStamp = getStamp();
+	
+
+	const publisher = new ROSLIB.Topic({
+		ros: rosbridge.ros,
+		name: topic,
+		messageType: 'ros_orchestration_pkg/Pipe',
+		latched: false
+	});
+
+	const pathMessage = new ROSLIB.Message({
+		closed: closeCheckbox.checked ? 1 : 0,
+		id: pipeId,
+		name: pipeName,
+		segments: poseList
+	});
+	publisher.publish(pathMessage);
+
+	status.setOK();
+}
+
+function getPoints() {
 	let poseList = [];
 
 	if(pointlist.length > 0)
@@ -161,23 +182,6 @@ function sendMessage(pointlist){
 			});
 		}
 	}
-
-	const publisher = new ROSLIB.Topic({
-		ros: rosbridge.ros,
-		name: topic,
-		messageType: 'ros_orchestration_pkg/Pipe',
-		latched: false
-	});
-
-	const pathMessage = new ROSLIB.Message({
-		closed: closeCheckbox.checked ? 1 : 0,
-		id: pipeId,
-		name: pipeName,
-		segments: poseList
-	});
-	publisher.publish(pathMessage);
-
-	status.setOK();
 }
 
 const canvas = document.getElementById('{uniqueID}_canvas');
