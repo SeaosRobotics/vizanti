@@ -36,7 +36,23 @@ startButton.addEventListener('click', ()=>{
 });
 
 saveButton.addEventListener('click', ()=>{
-	window.parent.postMessage({ action: 'pipe', data: 'Hello from iframe' }, '*');
+	const poseList = getPoints(points.slice(getStartIndex()));
+
+	if (poseList.length > 1) {
+		const pathMessage = new ROSLIB.Message({
+			closed: closeCheckbox.checked ? 1 : 0,
+			id: pipeId,
+			name: pipeName,
+			segments: poseList
+		});
+	
+		window.parent.postMessage({ action: 'pipe', data: pathMessage }, '*');
+	
+		status.setOK();
+	} else {
+		alert('There are not enough points to save.');
+	}
+	
 });
 
 const flipButton = document.getElementById("{uniqueID}_flip");
@@ -117,8 +133,8 @@ function getStamp(){
 }
 
 function sendMessage(pointlist){
-	let timeStamp = getStamp();
-	
+
+	const poseList = getPoints(pointlist);
 
 	const publisher = new ROSLIB.Topic({
 		ros: rosbridge.ros,
@@ -138,7 +154,7 @@ function sendMessage(pointlist){
 	status.setOK();
 }
 
-function getPoints() {
+function getPoints(pointlist) {
 	let poseList = [];
 
 	if(pointlist.length > 0)
@@ -182,6 +198,8 @@ function getPoints() {
 			});
 		}
 	}
+
+	return poseList;
 }
 
 const canvas = document.getElementById('{uniqueID}_canvas');
