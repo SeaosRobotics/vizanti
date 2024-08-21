@@ -24,29 +24,78 @@ let pipeName = "Pipe from RMS";
 let pipeId = 0;
 let points = [];
 let shift_pressed = false;
+let pipes = [];
 
 const icon = document.getElementById("{uniqueID}_icon");
 
 const startButton = document.getElementById("{uniqueID}_start");
 const saveButton = document.getElementById("{uniqueID}_save");
 
+const pipeNameBox = document.getElementById("{uniqueID}_name");
+const pipeIdBox = document.getElementById("{uniqueID}_pipeId");
+const closeCheckbox = document.getElementById('{uniqueID}_closePipe');
+
+const pipesBox = document.getElementById("{uniqueID}_pipes");
+window.addEventListener('message', (event) => {
+	console.log('========', event);
+	const message = event.data;
+	if (message.action === 'pipes') {
+		pipes = message.data;
+		let pipeslist = "<option value=''>Select pipe</option>";
+		pipes.forEach(element => {
+			pipeslist += "<option value='"+element.id+"'>"+element.name+"</option>";
+		});
+		pipesBox.innerHTML = pipeslist;
+	}
+});
+
+pipesBox.addEventListener("change", (event) => {
+	if (pipesBox.value == '') {
+		points = [];
+		drawWaypoints();
+		saveSettings();
+	} else {
+		points = [];
+		const pipe = pipes.find(({id}) => `${id}` === pipesBox.value);
+		pipe.path.forEach(segment => {
+			points.push(segment.point);
+		});
+		drawWaypoints();
+		saveSettings();
+		pipeNameBox.value = pipe.name;
+		pipeIdBox.value = pipe.id;
+		closeCheckbox.checked = pipe.closed;
+		
+		pipeName = pipeNameBox.value;
+		pipeId = pipeIdBox.value;
+	}
+});
+
 startButton.addEventListener('click', ()=>{
 	console.log("Points:",points.slice(getStartIndex()))
 	sendMessage(points.slice(getStartIndex()))
 });
 
-saveButton.addEventListener('click', ()=>{
+saveButton.addEventListener('click', async ()=>{
 	const poseList = getPoints(points.slice(getStartIndex()));
 
 	if (poseList.length > 1) {
+		const pipe = pipes.find(({id}) => `${id}` === pipeId);
+		let newData = true;
+		if (pipe !== null) {
+			newData = false;
+			if(await !confirm(`There is already a pipe with ID ${pipeId}, do you want to update it?`)){
+				return;
+			}
+		}
+		
 		const pathMessage = new ROSLIB.Message({
-			closed: closeCheckbox.checked ? 1 : 0,
+			close: closeCheckbox.checked ? 1 : 0,
 			id: pipeId,
 			name: pipeName,
-			segments: poseList
+			path: poseList
 		});
-	
-		window.parent.postMessage({ action: 'pipe', data: pathMessage }, '*');
+		window.parent.postMessage({ action: 'pipe', data: pathMessage, newData: newData}, '*');
 	
 		status.setOK();
 	} else {
@@ -72,9 +121,6 @@ deleteButton.addEventListener('click', async ()=>{
 	}
 });
 
-const pipeNameBox = document.getElementById("{uniqueID}_name");
-const pipeIdBox = document.getElementById("{uniqueID}_pipeId");
-const closeCheckbox = document.getElementById('{uniqueID}_closePipe');
 closeCheckbox.addEventListener('change', saveSettings);
 
 pipeNameBox.addEventListener('input', async () => {
@@ -676,3 +722,5 @@ function cancelLongPress(event) {
 resizeScreen();
 
 console.log("Waypoints Widget Loaded {uniqueID}")
+
+window.parent.postMessage({ action: 'pipes', data: '' }, '*');
