@@ -29,7 +29,9 @@ let pipes = [];
 const icon = document.getElementById("{uniqueID}_icon");
 
 const startButton = document.getElementById("{uniqueID}_start");
+const sendAllButton = document.getElementById("{uniqueID}_sendall");
 const saveButton = document.getElementById("{uniqueID}_save");
+const deleteDbButton = document.getElementById("{uniqueID}_deleteDb");
 
 const pipeNameBox = document.getElementById("{uniqueID}_name");
 const pipeIdBox = document.getElementById("{uniqueID}_pipeId");
@@ -37,7 +39,6 @@ const closeCheckbox = document.getElementById('{uniqueID}_closePipe');
 
 const pipesBox = document.getElementById("{uniqueID}_pipes");
 window.addEventListener('message', (event) => {
-	console.log('========', event);
 	const message = event.data;
 	if (message.action === 'pipes') {
 		pipes = message.data;
@@ -67,22 +68,64 @@ pipesBox.addEventListener("change", (event) => {
 		closeCheckbox.checked = pipe.closed;
 		
 		pipeName = pipeNameBox.value;
-		pipeId = pipeIdBox.value;
+		pipeId = pipe.id;
 	}
 });
 
 startButton.addEventListener('click', ()=>{
-	console.log("Points:",points.slice(getStartIndex()))
-	sendMessage(points.slice(getStartIndex()))
+	console.log("Points:",points)
+	sendMessage(points)
+});
+
+sendAllButton.addEventListener('click', ()=>{
+	const rosPipes = [];
+	pipes.forEach(pipe => {
+		const poseList = [];
+		pipe.path.forEach(p => {
+			poseList.push(new ROSLIB.Message({
+				point: {
+					x: p.point.x,
+					y: p.point.y,
+					z: 0.0
+				},
+				radius: p.radius,
+				shift_from_centre: p.shiftFromCentre,
+				can_overtake: p.canOvertake
+			}));
+		});
+
+		rosPipes.push(new ROSLIB.Message({
+			closed: pipe.closed ? 1 : 0,
+			id: pipe.id,
+			name: pipe.name,
+			segments: poseList
+		}));
+	});
+
+	const pipesService = new ROSLIB.Service({
+		ros: rosbridge.ros,
+		name: "/move_base/PipelinePlanner/receive_pipes",
+		serviceType: "ros_orchestration_pkg/ReceivePipes",
+	});
+
+	pipesService.callService(new ROSLIB.ServiceRequest({pipes: rosPipes}), (result) => {
+		if (result.read_status === 3)
+			alert('Pipes sent.');
+		else
+			alert(`Could not receive the pipes with status code: ${result.read_status}`);
+	}, (error) => {
+		console.error(error);
+		alert('Could not send the pipes.');
+	});
 });
 
 saveButton.addEventListener('click', async ()=>{
-	const poseList = getPoints(points.slice(getStartIndex()));
+	const poseList = getPoints(points);
 
 	if (poseList.length > 1) {
-		const pipe = pipes.find(({id}) => `${id}` === pipeId);
+		const pipe = pipes.find(({id}) => id == pipeId);
 		let newData = true;
-		if (pipe !== null) {
+		if (pipe !== undefined) {
 			newData = false;
 			if(await !confirm(`There is already a pipe with ID ${pipeId}, do you want to update it?`)){
 				return;
@@ -100,6 +143,31 @@ saveButton.addEventListener('click', async ()=>{
 		status.setOK();
 	} else {
 		alert('There are not enough points to save.');
+	}
+	
+});
+
+deleteDbButton.addEventListener('click', async ()=>{
+	const poseList = getPoints(points.slice(getStartIndex()));
+	if (poseList.length > 1) {
+		const pipe = pipes.find(({id}) => id == pipeId);
+		if (pipe !== undefined) {
+			if(await !confirm(`Are you sure that want to remove the pipe with ID ${pipeId} from the DBt?`)){
+				return;
+			}
+		}
+		
+		const pathMessage = new ROSLIB.Message({
+			close: closeCheckbox.checked ? 1 : 0,
+			id: pipeId,
+			name: pipeName,
+			path: poseList
+		});
+		window.parent.postMessage({ action: 'delete-pipe', data: pathMessage}, '*');
+		points = [];
+		drawWaypoints();
+		saveSettings();
+		status.setOK();
 	}
 	
 });
@@ -129,7 +197,7 @@ pipeNameBox.addEventListener('input', async () => {
 });
 
 pipeIdBox.addEventListener('input', async () => {
-	pipeId = pipeIdBox.value;
+	pipeId = parseInt(pipeIdBox.value);
 	saveSettings();
 });
 
@@ -196,7 +264,7 @@ function sendMessage(pointlist){
 		segments: poseList
 	});
 	publisher.publish(pathMessage);
-
+	alert('Pipe sent.');
 	status.setOK();
 }
 
@@ -205,44 +273,18 @@ function getPoints(pointlist) {
 
 	if(pointlist.length > 0)
 	{
-		if(pointlist.length  == 1){
+		pointlist.forEach((point, index) => {
 			poseList.push(new ROSLIB.Message({
 				point: {
-					x: pointlist[0].x,
-					y: pointlist[0].y,
+					x: point.x,
+					y: point.y,
 					z: 0.0
 				},
 				radius: 1,
 				shift_from_centre: 0,
 				can_overtake: 0
 			}));
-		}
-		else
-		{
-			pointlist.forEach((point, index) => {
-				let p0;
-				let p1;
-
-				if(index < pointlist.length-1){
-					p0 = point;
-					p1 = pointlist[index+1];
-				}else{
-					p0 = pointlist[index-1];
-					p1 = point;
-				}
-
-				poseList.push(new ROSLIB.Message({
-					point: {
-						x: point.x,
-						y: point.y,
-						z: 0.0
-					},
-					radius: 1,
-					shift_from_centre: 0,
-					can_overtake: 0
-				}));
-			});
-		}
+		});
 	}
 
 	return poseList;
